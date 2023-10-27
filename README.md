@@ -4,91 +4,143 @@
 # Modelo Lógico:
 ![image](https://github.com/AndreFelipefer/COMERCIO_ELETRONICO/assets/129207232/17aefaf2-0ba1-4ad4-95ef-382956d198f4)
 
+## Criando as tabelas -
+```SQL
+CREATE TABLE produtos (
+  id INT NOT NULL AUTO_INCREMENT,
+  nome VARCHAR(255) NOT NULL,
+  descricao VARCHAR(255),
+  preco DECIMAL(10,2) NOT NULL,
+  quantidade_estoque INT NOT NULL,
+  PRIMARY KEY (id)
+);
 
-## Implemente uma stored procedure para permitir que os clientes adicionem produtos ao carrinho de compras.
+CREATE TABLE pedidos (
+  id INT NOT NULL AUTO_INCREMENT,
+  data DATETIME NOT NULL,
+  cliente_id INT NOT NULL,
+  status VARCHAR(255) NOT NULL,
+  PRIMARY KEY (id),
+  FOREIGN KEY (cliente_id) REFERENCES clientes (id)
+);
+
+CREATE TABLE clientes (
+  id INT NOT NULL AUTO_INCREMENT,
+  nome VARCHAR(255) NOT NULL,
+  endereco_entrega VARCHAR(255),
+  telefone VARCHAR(255),
+  email VARCHAR(255),
+  PRIMARY KEY (id)
+);
+
+CREATE TABLE itens_pedido (
+  pedido_id INT NOT NULL,
+  produto_id INT NOT NULL,
+  quantidade INT NOT NULL,
+  PRIMARY KEY (pedido_id, produto_id),
+  FOREIGN KEY (pedido_id) REFERENCES pedidos (id),
+  FOREIGN KEY (produto_id) REFERENCES produtos (id)
+);
+```
+## Criando os relacionamentos
+```SQL
+ALTER TABLE pedidos ADD FOREIGN KEY (cliente_id) REFERENCES clientes (id);
+
+ALTER TABLE itens_pedido ADD FOREIGN KEY (produto_id) REFERENCES produtos (id);
+```
+## Implementando as stored procedures
+### Adicionar produto ao carrinho
 ```SQL
 delimiter $
-create procedure ListaPedidos(
-pedido varchar(100),
-quantidadePedido int
-)
-begin 
-	insert into itens_de_pedido(pedido,quantidadePedido,Produtos_idProdutos) values (pedido,quantidadePedido,Produtos_idProdutos);
-end$
-delimiter ;
-```
-## Insert Conforme Procedure
-```SQL
-call ListaPedidos ('Caixa de Som', 3);
-call ListaPedidos ('Mouse', 2);
-call ListaPedidos ('Teclado', 1);
-call ListaPedidos ('Headphones', 5);
-call ListaPedidos ('Notebook', 1);
-call ListaPedidos ('Smartphone', 2);
-call ListaPedidos ('Tablet', 1);
-call ListaPedidos ('TV', 5);
-call ListaPedidos ('Geladeira', 1);
-call ListaPedidos ('Fogão', 2);
-call ListaPedidos ('Lava-louças', 1);
-call ListaPedidos ('Máquina de lavar', 5);
-call ListaPedidos ('Micro-ondas', 1);
-call ListaPedidos ('Ar-condicionado', 2);
-call ListaPedidos ('Lavadora de roupas', 1);
-call ListaPedidos ('Secadora de roupas', 5);
-call ListaPedidos ('Forno elétrico', 1);
-```
-## Crie uma stored procedure para processar pedidos, atualizando o estoque de produtos e registrando os detalhes do pedido.
-
-```SQL
-DELIMITER $
-
-CREATE PROCEDURE ProcessarPedido(
-    IN pClienteNome VARCHAR(100),
-    IN pProdutoNome VARCHAR(100),
-    IN pQuantidade INT
+CREATE PROCEDURE adicionar_produto_ao_carrinho (
+  IN id_produto INT,
+  IN quantidade INT
 )
 BEGIN
-    DECLARE clienteId INT;
-    DECLARE produtoId INT;
-    DECLARE estoqueAtual INT;
-    
-    -- Obtém o ID do cliente
-    SELECT idClientes INTO clienteId FROM Clientes WHERE nomeCliente = pClienteNome;
-    
-    -- Obtém o ID do produto
-    SELECT idProdutos INTO produtoId FROM Produtos WHERE nome = pProdutoNome;
-    
-    -- Obtém o estoque atual do produto
-    SELECT quantidadeEstoque INTO estoqueAtual FROM Produtos WHERE idProdutos = produtoId;
-    
-    -- Verifica se o estoque é suficiente
-    IF estoqueAtual >= pQuantidade THEN
-        -- Atualiza o estoque do produto
-        UPDATE Produtos SET quantidadeEstoque = estoqueAtual - pQuantidade WHERE idProdutos = produtoId;
-    
-        -- Registra o pedido
-        INSERT INTO Pedidos (data, clientePedido, status)
-        VALUES (CURDATE(), pClienteNome, 'Enviado');  -- Status 'Enviado'
-    
-        -- Obtém o ID do último pedido inserido
-        SET @pedidoId = LAST_INSERT_ID();
-    
-        -- Registra os detalhes do pedido
-        INSERT INTO Itens_de_Pedido (pedido, quantidadePedido, Produtos_idProdutos)
-        VALUES (@pedidoId, pQuantidade, produtoId);
-    ELSE
-        -- Caso o estoque não seja suficiente
-        -- Você pode lidar com isso de acordo com sua lógica de negócios
-        -- Pode lançar um erro, retornar uma mensagem, etc.
-        -- Neste exemplo, apenas mostraremos uma mensagem de estoque insuficiente
-        SELECT 'Estoque insuficiente para o produto selecionado.' AS Resultado;
-    END IF;
-    
-END $
 
-DELIMITER ;
+  INSERT INTO itens_pedido ( produto_id, quantidade)
+  VALUES (id_produto, quantidade);
+
+END$
+delimiter ;
 ```
-## Chamando o Procedure para atualizar sistema:
+
+## Processar pedido
 ```SQL
-CALL ProcessarPedido('Antonio', 'Caixa de Som', 3);
+delimiter $
+
+CREATE PROCEDURE processar_pedido (
+  IN id_cliente INT,
+  IN data DATETIME,
+  IN status VARCHAR(255)
+)
+BEGIN
+
+  DECLARE id_pedido INT;
+
+  -- Incrementar o id do pedido
+  SET id_pedido = (SELECT MAX(id) + 1 FROM pedidos);
+
+  -- Inserir os detalhes do pedido
+  INSERT INTO pedidos (id, data, cliente_id, status)
+  VALUES (id_pedido, data, id_cliente, status);
+
+  -- Atualizar o estoque dos produtos
+  UPDATE produtos
+  SET quantidade_estoque = quantidade_estoque - 
+    (SELECT quantidade FROM itens_pedido WHERE pedido_id = id_pedido);
+
+END$
+
+delimiter ;
+```
+## Calcular o total de um pedido 
+```SQL
+delimiter $
+
+CREATE PROCEDURE calcular_total_pedido (
+  IN id_pedido INT
+)
+BEGIN
+  DECLARE total DECIMAL(10,2);
+
+  -- Obter o total do pedido
+  SELECT SUM(produto.preco * itens_pedido.quantidade) INTO total
+  FROM itens_pedido
+  INNER JOIN produtos ON produtos.id = itens_pedido.produto_id
+  WHERE itens_pedido.pedido_id = id_pedido;
+
+  -- Retornar o total
+  SELECT total;
+END$
+delimiter ;
+```
+
+# Implementando as views
+## Histórico de pedidos
+```SQL
+CREATE VIEW historico_pedidos AS
+SELECT
+  pedidos.id,
+  pedidos.data,
+  pedidos.cliente_id,
+  pedidos.status,
+  produtos.nome AS produto,
+  itens_pedido.quantidade AS quantidade
+FROM pedidos
+INNER JOIN itens_pedido ON itens_pedido.pedido_id = pedidos.id
+INNER JOIN produtos ON produtos.id = itens_pedido.produto_id;
+```
+
+## Produtos disponíveis
+```SQL
+CREATE VIEW produtos_disponiveis AS
+SELECT
+  produtos.id,
+  produtos.nome,
+  produtos.descricao,
+  produtos.preco,
+  produtos.quantidade_estoque
+FROM produtos
+WHERE produtos.quantidade_estoque > 0;
 ```
